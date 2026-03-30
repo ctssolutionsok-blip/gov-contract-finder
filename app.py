@@ -5,16 +5,14 @@ import streamlit as st
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-import streamlit as st
+st.set_page_config(page_title="Gov Contract Finder", layout="wide")
+st.title("Government Contract Finder")
 
 try:
     sam_api_key = st.secrets["SAM_API_KEY"]
 except Exception:
     st.error("SAM.gov API key not configured.")
     st.stop()
-
-st.set_page_config(page_title="Gov Contract Finder", layout="wide")
-st.title("Government Contract Finder")
 
 USASPENDING_NAICS_AUTOCOMPLETE_URL = "https://api.usaspending.gov/api/v2/autocomplete/naics/"
 USASPENDING_AWARD_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
@@ -51,6 +49,7 @@ SET_ASIDE_OPTIONS = {
     "VSS - Veteran-Owned Small Business Sole Source": "VSS",
 }
 
+
 def build_session():
     session = requests.Session()
     retry = Retry(
@@ -66,10 +65,13 @@ def build_session():
     session.mount("http://", adapter)
     return session
 
+
 session = build_session()
+
 
 def safe_to_numeric(series):
     return pd.to_numeric(series, errors="coerce").fillna(0)
+
 
 def keyword_filter(df, columns, raw_keywords):
     if df.empty:
@@ -87,37 +89,38 @@ def keyword_filter(df, columns, raw_keywords):
     pattern = "|".join(kw_list)
     return df[combined.str.contains(pattern, na=False)]
 
+
 @st.cache_data(show_spinner=False)
 def search_naics_options(search_text):
     fallback = {
-"541613 - Marketing Consulting Services": "541613",
-"541910 - Marketing Research and Public Opinion Polling": "541910",
-"541611 - Administrative Management and General Management Consulting Services": "541611",
-"541990 - All Other Professional, Scientific, and Technical Services": "541990",
-"541330 - Engineering Services": "541330",
-"541715 - Research and Development in the Physical, Engineering, and Life Sciences (except Nanotech and Biotech)": "541715",
-"513210 - Software Publishers": "513210",
-"517111 - Wired Telecommunications Carriers": "517111",
-"517810 - All Other Telecommunications": "517810",
-"518210 - Computing Infrastructure Providers, Data Processing, Web Hosting, and Related Services": "518210",
-"519210 - Libraries and Archives": "519210",
-"519290 - Web Search Portals and All Other Information Services": "519290",
-"541511 - Custom Computer Programming Services": "541511",
-"541513 - Computer Facilities Management Services": "541513",
-"541519 - Other Computer Related Services": "541519",
-"561110 - Office Administrative Services": "561110",
-"561612 - Security Guards and Patrol Services": "561612",
-"561621 - Security Systems Services (except Locksmiths)": "561621",
-"611420 - Computer Training": "611420",
-"611430 - Professional and Management Development Training": "611430",
-"611512 - Flight Training": "611512",
-"611519 - Other Technical and Trade Schools": "611519",
-"611710 - Educational Support Services": "611710",
-"484110 - General Freight Trucking, Local": "484110",
-"484121 - General Freight Trucking, Long-Distance, Truckload": "484121",
-"484122 - General Freight Trucking, Long-Distance, Less Than Truckload": "484122",
-"531210 - Offices of Real Estate Agents and Brokers": "531210",
-"811210 - Electronic and Precision Equipment Repair and Maintenance": "811210",
+        "541613 - Marketing Consulting Services": "541613",
+        "541910 - Marketing Research and Public Opinion Polling": "541910",
+        "541611 - Administrative Management and General Management Consulting Services": "541611",
+        "541990 - All Other Professional, Scientific, and Technical Services": "541990",
+        "541330 - Engineering Services": "541330",
+        "541715 - Research and Development in the Physical, Engineering, and Life Sciences (except Nanotech and Biotech)": "541715",
+        "513210 - Software Publishers": "513210",
+        "517111 - Wired Telecommunications Carriers": "517111",
+        "517810 - All Other Telecommunications": "517810",
+        "518210 - Computing Infrastructure Providers, Data Processing, Web Hosting, and Related Services": "518210",
+        "519210 - Libraries and Archives": "519210",
+        "519290 - Web Search Portals and All Other Information Services": "519290",
+        "541511 - Custom Computer Programming Services": "541511",
+        "541513 - Computer Facilities Management Services": "541513",
+        "541519 - Other Computer Related Services": "541519",
+        "561110 - Office Administrative Services": "561110",
+        "561612 - Security Guards and Patrol Services": "561612",
+        "561621 - Security Systems Services (except Locksmiths)": "561621",
+        "611420 - Computer Training": "611420",
+        "611430 - Professional and Management Development Training": "611430",
+        "611512 - Flight Training": "611512",
+        "611519 - Other Technical and Trade Schools": "611519",
+        "611710 - Educational Support Services": "611710",
+        "484110 - General Freight Trucking, Local": "484110",
+        "484121 - General Freight Trucking, Long-Distance, Truckload": "484121",
+        "484122 - General Freight Trucking, Long-Distance, Less Than Truckload": "484122",
+        "531210 - Offices of Real Estate Agents and Brokers": "531210",
+        "811210 - Electronic and Precision Equipment Repair and Maintenance": "811210",
     }
 
     if not search_text.strip():
@@ -152,6 +155,7 @@ def search_naics_options(search_text):
     except Exception:
         return fallback
 
+
 def extract_sam_state(value):
     if isinstance(value, dict):
         return (
@@ -161,6 +165,7 @@ def extract_sam_state(value):
             or value.get("stateAbbreviation")
         )
     return None
+
 
 source = st.radio("Data Source", ["USAspending", "SAM.gov", "Both"])
 
@@ -202,9 +207,6 @@ keywords = st.text_input("Include Keywords (optional, comma separated)", value="
 set_aside_label = st.selectbox("Set-Aside Filter (SAM only)", list(SET_ASIDE_OPTIONS.keys()))
 selected_set_aside = SET_ASIDE_OPTIONS[set_aside_label]
 
-sam_api_key = ""
-if source in ["SAM.gov", "Both"]:
-    sam_api_key = st.text_input("SAM.gov API Key", type="password")
 
 def fetch_usaspending():
     payload = {
@@ -282,10 +284,14 @@ def fetch_usaspending():
     df["Source"] = "USAspending"
     return df
 
+
+def fetch_sam():
     rows_all = []
+
     for naics_code in selected_naics:
         for year in range(start_year, end_year + 1):
             offset = 0
+
             while True:
                 params = {
                     "api_key": sam_api_key,
@@ -295,6 +301,7 @@ def fetch_usaspending():
                     "limit": 1000,
                     "offset": offset
                 }
+
                 if selected_set_aside:
                     params["typeOfSetAside"] = selected_set_aside
 
@@ -302,14 +309,17 @@ def fetch_usaspending():
                 r.raise_for_status()
                 data = r.json()
                 rows = data.get("opportunitiesData", [])
+
                 if not rows:
                     break
 
                 rows_all.extend(rows)
                 total_records = int(data.get("totalRecords", 0) or 0)
                 offset += 1000
+
                 if offset >= total_records:
                     break
+
                 time.sleep(0.2)
 
     df = pd.DataFrame(rows_all)
@@ -345,6 +355,7 @@ def fetch_usaspending():
     df["Source"] = "SAM.gov"
     return df
 
+
 if st.button("Run Search"):
     try:
         if not selected_naics:
@@ -356,28 +367,6 @@ if st.button("Run Search"):
                 usa_df = fetch_usaspending()
                 if not usa_df.empty:
                     frames.append(usa_df)
-def fetch_sam():
-    url = "https://api.sam.gov/opportunities/v2/search"
-
-    params = {
-        "api_key": sam_api_key,
-        "limit": 10
-    }
-
-    try:
-        response = requests.get(url, params=params)
-
-        if response.status_code == 200:
-            data = response.json()
-            opportunities = data.get("opportunitiesData", [])
-            return pd.DataFrame(opportunities)
-        else:
-            st.error("Error fetching SAM.gov data")
-            return pd.DataFrame()
-
-    except Exception as e:
-        st.error(f"SAM.gov error: {e}")
-        return pd.DataFrame()
 
             if source in ["SAM.gov", "Both"]:
                 sam_df = fetch_sam()
