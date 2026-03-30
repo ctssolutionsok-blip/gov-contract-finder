@@ -5,8 +5,8 @@ import streamlit as st
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-st.set_page_config(page_title="Gov Contract Finder", layout="wide")
-st.title("Government Contract Finder")
+st.set_page_config(page_title="Gov Contract Finder™", layout="wide")
+st.title("Gov Contract Finder")
 
 try:
     sam_api_key = st.secrets["SAM_API_KEY"]
