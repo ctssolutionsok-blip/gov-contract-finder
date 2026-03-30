@@ -49,6 +49,16 @@ SET_ASIDE_OPTIONS = {
     "VSS - Veteran-Owned Small Business Sole Source": "VSS",
 }
 
+NOTICE_TYPE_OPTIONS = {
+    "Any / No Filter": "",
+    "Sources Sought": "Sources Sought",
+    "Solicitation": "Solicitation",
+    "Award Notice": "Award Notice",
+    "Combined Synopsis/Solicitation": "Combined Synopsis/Solicitation",
+    "Presolicitation": "Presolicitation",
+    "Special Notice": "Special Notice",
+    "Justification": "Justification",
+}
 
 def build_session():
     session = requests.Session()
@@ -65,13 +75,10 @@ def build_session():
     session.mount("http://", adapter)
     return session
 
-
 session = build_session()
-
 
 def safe_to_numeric(series):
     return pd.to_numeric(series, errors="coerce").fillna(0)
-
 
 def keyword_filter(df, columns, raw_keywords):
     if df.empty:
@@ -89,9 +96,8 @@ def keyword_filter(df, columns, raw_keywords):
     pattern = "|".join(kw_list)
     return df[combined.str.contains(pattern, na=False)]
 
-
 @st.cache_data(show_spinner=False)
-def search_naics_options(search_text):
+def load_all_naics():
     fallback = {
         "541613 - Marketing Consulting Services": "541613",
         "541910 - Marketing Research and Public Opinion Polling": "541910",
@@ -123,38 +129,35 @@ def search_naics_options(search_text):
         "811210 - Electronic and Precision Equipment Repair and Maintenance": "811210",
     }
 
-    if not search_text.strip():
-        return fallback
-
     try:
-        r = session.post(
-            USASPENDING_NAICS_AUTOCOMPLETE_URL,
-            json={"search_text": search_text},
-            timeout=30
-        )
-        r.raise_for_status()
-        data = r.json()
+        df = pd.read_excel("2022_NAICS_Structure.xlsx")
+        df.columns = [str(c).strip() for c in df.columns]
 
-        if isinstance(data, dict):
-            items = data.get("results", data.get("matches", data.get("naics", [])))
-        else:
-            items = data if isinstance(data, list) else []
+        code_col = None
+        title_col = None
+
+        for col in df.columns:
+            low = col.lower()
+            if "naics code" in low:
+                code_col = col
+            if "naics title" in low:
+                title_col = col
+
+        if code_col is None or title_col is None:
+            return fallback
 
         options = {}
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            code = item.get("code") or item.get("naics_code") or item.get("naics") or item.get("id")
-            title = item.get("description") or item.get("naics_description") or item.get("label") or item.get("name") or item.get("title")
-            if code and title:
-                code = str(code).strip()
+        for _, row in df.iterrows():
+            code = str(row[code_col]).strip()
+            title = str(row[title_col]).strip()
+
+            if code and code.lower() != "nan" and title and title.lower() != "nan":
                 if code.isdigit():
                     options[f"{code} - {title}"] = code
 
         return dict(sorted(options.items())) if options else fallback
     except Exception:
         return fallback
-
 
 def extract_sam_state(value):
     if isinstance(value, dict):
@@ -166,16 +169,24 @@ def extract_sam_state(value):
         )
     return None
 
-
 source = st.radio("Data Source", ["USAspending", "SAM.gov", "Both"])
 
-naics_search = st.text_input("Search NAICS by code or words", value="consulting")
-naics_options = search_naics_options(naics_search)
+naics_search = st.text_input("Search NAICS by code or words", value="")
+all_naics_options = load_all_naics()
+
+if naics_search.strip():
+    naics_options = {
+        label: code
+        for label, code in all_naics_options.items()
+        if naics_search.lower() in label.lower() or naics_search in code
+    }
+else:
+    naics_options = all_naics_options
 
 selected_labels = st.multiselect(
     "Select NAICS Code(s)",
     list(naics_options.keys()),
-    default=[label for label in naics_options if label.startswith("541611") or label.startswith("541613")]
+    default=[]
 )
 
 manual_naics = st.text_input("Optional: manually add NAICS codes (comma separated)", value="")
@@ -207,6 +218,8 @@ keywords = st.text_input("Include Keywords (optional, comma separated)", value="
 set_aside_label = st.selectbox("Set-Aside Filter (SAM only)", list(SET_ASIDE_OPTIONS.keys()))
 selected_set_aside = SET_ASIDE_OPTIONS[set_aside_label]
 
+notice_type_label = st.selectbox("Notice Type Filter (SAM only)", list(NOTICE_TYPE_OPTIONS.keys()))
+selected_notice_type = NOTICE_TYPE_OPTIONS[notice_type_label]
 
 def fetch_usaspending():
     payload = {
@@ -284,7 +297,6 @@ def fetch_usaspending():
     df["Source"] = "USAspending"
     return df
 
-
 def fetch_sam():
     rows_all = []
 
@@ -345,6 +357,10 @@ def fetch_sam():
     if "placeOfPerformance" in df.columns:
         df["State"] = df["placeOfPerformance"].apply(extract_sam_state)
 
+    if selected_notice_type and "Notice Type" in df.columns:
+        df = df[df["Notice Type"].fillna("").astype(str).str.strip().str.lower() == selected_notice_type.lower()]
+    st.caption(f"SAM after notice type filter: {len(df)}")
+
     df = keyword_filter(df, ["Title", "Agency", "Notice Type", "Set Aside"], keywords)
     st.caption(f"SAM after keyword filter: {len(df)}")
 
@@ -354,7 +370,6 @@ def fetch_sam():
 
     df["Source"] = "SAM.gov"
     return df
-
 
 if st.button("Run Search"):
     try:
