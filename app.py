@@ -356,6 +356,28 @@ if st.button("Run Search"):
                 usa_df = fetch_usaspending()
                 if not usa_df.empty:
                     frames.append(usa_df)
+def fetch_sam():
+    url = "https://api.sam.gov/opportunities/v2/search"
+
+    params = {
+        "api_key": sam_api_key,
+        "limit": 10
+    }
+
+    try:
+        response = requests.get(url, params=params)
+
+        if response.status_code == 200:
+            data = response.json()
+            opportunities = data.get("opportunitiesData", [])
+            return pd.DataFrame(opportunities)
+        else:
+            st.error("Error fetching SAM.gov data")
+            return pd.DataFrame()
+
+    except Exception as e:
+        st.error(f"SAM.gov error: {e}")
+        return pd.DataFrame()
 
             if source in ["SAM.gov", "Both"]:
                 sam_df = fetch_sam()
