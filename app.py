@@ -78,7 +78,13 @@ def load_all_naics():
 
     df["Code"] = df["Code"].astype(str).str.strip()
     df["Title"] = df["Title"].astype(str).str.strip()
+
+    # Keep only clean numeric 5- or 6-digit NAICS codes
+    # This avoids broad sector/group codes like 11 or 111 that can break SAM searches
+    df = df[df["Code"].str.fullmatch(r"\d{5,6}")]
+
     df = df.drop_duplicates(subset=["Code", "Title"]).sort_values(["Code", "Title"])
+    df["label"] = df["Code"] + " - " + df["Title"]
 
     return df
 
@@ -87,11 +93,10 @@ st.sidebar.header("Filters")
 
 source = st.sidebar.radio("Data Source", ["USAspending", "SAM.gov", "Both"])
 
-# -------- NAICS (FIXED) --------
+# -------- NAICS --------
 st.sidebar.subheader("NAICS Selection")
 
 naics_df = load_all_naics()
-naics_df["label"] = naics_df["Code"] + " - " + naics_df["Title"]
 
 selected_naics = st.sidebar.multiselect(
     "Select NAICS Code(s)",
@@ -126,22 +131,22 @@ if selected_naics:
 # -------- OTHER FILTERS --------
 states = st.sidebar.multiselect(
     "States",
-    ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS",
-     "KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY",
-     "NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV",
-     "WI","WY"]
+    [
+        "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS",
+        "KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY",
+        "NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV",
+        "WI","WY"
+    ]
 )
 
 start_year = st.sidebar.number_input("Start Year", min_value=2015, max_value=2026, value=2020)
 end_year = st.sidebar.number_input("End Year", min_value=2015, max_value=2026, value=2022)
-
 min_value = st.sidebar.number_input("Min Value", min_value=0, max_value=1000000000, value=0, step=1000)
 keywords = st.sidebar.text_input("Keywords", help="Separate multiple keywords with commas")
 
 # ---------------- FETCH ----------------
 def fetch_usaspending(selected_naics, start_year, end_year, min_value, keywords):
     payload = {
-        "fields": ["Award ID", "Recipient Name", "Award Amount", "Start Date", "NAICS Code"],
         "filters": {
             "time_period": [
                 {
@@ -150,10 +155,19 @@ def fetch_usaspending(selected_naics, start_year, end_year, min_value, keywords)
                 }
             ]
         },
-        "limit": 100,
+        "fields": [
+            "Award ID",
+            "Recipient Name",
+            "Award Amount",
+            "Start Date",
+            "NAICS Code",
+            "Awarding Agency"
+        ],
         "page": 1,
+        "limit": 100,
         "sort": "Award Amount",
-        "order": "desc"
+        "order": "desc",
+        "subawards": False
     }
 
     if selected_naics:
@@ -180,7 +194,8 @@ def fetch_usaspending(selected_naics, start_year, end_year, min_value, keywords)
 def fetch_sam(selected_naics, states, keywords):
     rows = []
 
-    # If no NAICS selected, still allow SAM search
+    # If user selected NAICS, only search valid detailed codes
+    # If nothing selected, do one broad request without ncode
     naics_to_search = selected_naics if selected_naics else [None]
 
     for naics in naics_to_search:
@@ -190,8 +205,13 @@ def fetch_sam(selected_naics, states, keywords):
             "offset": 0,
         }
 
+        # Only send ncode if it is a valid 5- or 6-digit numeric NAICS code
         if naics:
-            params["ncode"] = naics
+            naics_str = str(naics).strip()
+            if naics_str.isdigit() and len(naics_str) in [5, 6]:
+                params["ncode"] = naics_str
+            else:
+                continue
 
         response = session.get(SAM_URL, params=params, timeout=60)
         response.raise_for_status()
@@ -204,9 +224,15 @@ def fetch_sam(selected_naics, states, keywords):
     if df.empty:
         return df
 
-    # State filter if available in response
+    # Apply state filtering if SAM response includes a recognizable state column
     if states:
-        possible_state_cols = ["placeOfPerformanceState", "placeOfPerformance", "state", "popState"]
+        possible_state_cols = [
+            "placeOfPerformanceState",
+            "placeOfPerformance",
+            "state",
+            "popState"
+        ]
+
         found_state_col = None
         for col in possible_state_cols:
             if col in df.columns:
@@ -224,10 +250,15 @@ def fetch_sam(selected_naics, states, keywords):
 # ---------------- RUN ----------------
 if st.button("Run Search"):
     frames = []
+    errors = []
 
-    try:
-        if source in ["USAspending", "Both"]:
-            with st.spinner("Fetching USAspending..."):
+    if start_year > end_year:
+        st.error("Start Year cannot be greater than End Year.")
+        st.stop()
+
+    if source in ["USAspending", "Both"]:
+        with st.spinner("Fetching USAspending..."):
+            try:
                 us_df = fetch_usaspending(
                     selected_naics=selected_naics,
                     start_year=start_year,
@@ -237,9 +268,14 @@ if st.button("Run Search"):
                 )
                 if not us_df.empty:
                     frames.append(us_df)
+            except requests.exceptions.HTTPError as e:
+                errors.append(f"USAspending error: {e}")
+            except Exception as e:
+                errors.append(f"USAspending error: {e}")
 
-        if source in ["SAM.gov", "Both"]:
-            with st.spinner("Fetching SAM.gov..."):
+    if source in ["SAM.gov", "Both"]:
+        with st.spinner("Fetching SAM.gov..."):
+            try:
                 sam_df = fetch_sam(
                     selected_naics=selected_naics,
                     states=states,
@@ -247,15 +283,18 @@ if st.button("Run Search"):
                 )
                 if not sam_df.empty:
                     frames.append(sam_df)
+            except requests.exceptions.HTTPError as e:
+                errors.append(f"SAM.gov error: {e}")
+            except Exception as e:
+                errors.append(f"SAM.gov error: {e}")
 
-        if frames:
-            final = pd.concat(frames, ignore_index=True, sort=False)
-            st.success(f"{len(final)} results found")
-            st.dataframe(final, use_container_width=True)
-        else:
-            st.warning("No results found.")
+    if frames:
+        final = pd.concat(frames, ignore_index=True, sort=False)
+        st.success(f"{len(final)} results found")
+        st.dataframe(final, use_container_width=True)
+    else:
+        st.warning("No results found.")
 
-    except requests.exceptions.RequestException as e:
-        st.error(f"API request failed: {e}")
-    except Exception as e:
-        st.error(f"Something went wrong: {e}")
+    if errors:
+        for err in errors:
+            st.error(err)
