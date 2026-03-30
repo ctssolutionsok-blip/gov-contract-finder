@@ -5,6 +5,14 @@ import streamlit as st
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+import streamlit as st
+
+try:
+    sam_api_key = st.secrets["SAM_API_KEY"]
+except Exception:
+    st.error("SAM.gov API key not configured.")
+    st.stop()
+
 st.set_page_config(page_title="Gov Contract Finder", layout="wide")
 st.title("Government Contract Finder")
 
@@ -273,11 +281,6 @@ def fetch_usaspending():
 
     df["Source"] = "USAspending"
     return df
-
-def fetch_sam():
-    if not sam_api_key:
-        st.warning("Please enter your SAM.gov API key.")
-        return pd.DataFrame()
 
     rows_all = []
     for naics_code in selected_naics:
