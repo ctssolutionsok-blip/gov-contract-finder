@@ -98,8 +98,27 @@ def keyword_filter(df, columns, raw_keywords):
 @st.cache_data(show_spinner=False)
 def load_all_naics():
     try:
-        # The Census file has a title row first, then the real headers
-        df = pd.read_excel("2022_NAICS_Structure.xlsx", header=1)
+        raw_df = pd.read_excel("2022_NAICS_Structure.xlsx", header=None)
+
+        header_row = None
+        max_rows_to_scan = min(25, len(raw_df))
+
+        for i in range(max_rows_to_scan):
+            row_values = [str(x).strip().lower() for x in raw_df.iloc[i].tolist()]
+            has_code = any("naics code" in v for v in row_values)
+            has_title = any("naics title" in v for v in row_values)
+
+            if has_code and has_title:
+                header_row = i
+                break
+
+        if header_row is None:
+            st.error("Could not find the NAICS header row in the Excel file.")
+            st.write("First 15 rows of the file for debugging:")
+            st.dataframe(raw_df.head(15))
+            return {}
+
+        df = pd.read_excel("2022_NAICS_Structure.xlsx", header=header_row)
         df.columns = [str(c).strip() for c in df.columns]
 
         code_col = None
@@ -113,7 +132,7 @@ def load_all_naics():
                 title_col = col
 
         if code_col is None or title_col is None:
-            st.error(f"Could not find NAICS columns. Columns found: {list(df.columns)}")
+            st.error(f"Could not find NAICS columns after loading header row. Columns found: {list(df.columns)}")
             return {}
 
         df = df[[code_col, title_col]].copy()
@@ -244,11 +263,14 @@ def fetch_usaspending():
         rows = data.get("results", [])
         if not rows:
             break
+
         rows_all.extend(rows)
         page_meta = data.get("page_metadata", {})
         has_next = page_meta.get("hasNext") or page_meta.get("has_next_page")
+
         if not has_next:
             break
+
         payload["page"] += 1
         time.sleep(0.2)
 
@@ -260,6 +282,7 @@ def fetch_usaspending():
 
     df["Award Amount"] = safe_to_numeric(df["Award Amount"])
     df = df[df["Award Amount"] >= min_value]
+
     if max_value is not None:
         df = df[df["Award Amount"] <= max_value]
     st.caption(f"USAspending after amount filter: {len(df)}")
@@ -342,7 +365,10 @@ def fetch_sam():
         df["State"] = df["placeOfPerformance"].apply(extract_sam_state)
 
     if selected_notice_type and "Notice Type" in df.columns:
-        df = df[df["Notice Type"].fillna("").astype(str).str.strip().str.lower() == selected_notice_type.lower()]
+        df = df[
+            df["Notice Type"].fillna("").astype(str).str.strip().str.lower()
+            == selected_notice_type.lower()
+        ]
     st.caption(f"SAM after notice type filter: {len(df)}")
 
     df = keyword_filter(df, ["Title", "Agency", "Notice Type", "Set Aside"], keywords)
