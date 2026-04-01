@@ -1,3 +1,4 @@
+import html as _html
 import io
 import json
 import re
@@ -551,6 +552,10 @@ def truncate_text(value, limit=240):
         return ""
     return text[:limit].rstrip() + "..." if len(text) > limit else text
 
+def h(value, default="—"):
+    """HTML-escape a value so user data never breaks card markup."""
+    return _html.escape(safe_text(value, default))
+
 def make_hashable(value):
     if isinstance(value, (list, dict, set, tuple)):
         try:
@@ -804,6 +809,46 @@ def clean_sam_results(df, user_naics=None, user_states=None, user_keywords="", u
     }
     df.rename(columns=rename_map, inplace=True)
 
+    # ---- Extract nested place of performance ----
+    def extract_pop_city(row):
+        pop = row.get("placeOfPerformance") or row.get("pop") or {}
+        if isinstance(pop, dict):
+            city = (pop.get("city") or {})
+            city_name = city.get("name", "") if isinstance(city, dict) else ""
+            state_obj = (pop.get("state") or {})
+            state_code = state_obj.get("code", "") if isinstance(state_obj, dict) else ""
+            zip_code = pop.get("zip", "")
+            parts = [p for p in [city_name, state_code, zip_code] if p]
+            return ", ".join(parts)
+        return ""
+
+    def extract_award_value(row):
+        award = row.get("award") or {}
+        if isinstance(award, dict):
+            amt = award.get("amount") or award.get("awardAmount") or ""
+            try:
+                val = float(str(amt).replace(",", "").replace("$", ""))
+                return format_currency(val)
+            except Exception:
+                return ""
+        return ""
+
+    if "placeOfPerformance" in df.columns or "pop" in df.columns:
+        df["Place of Performance"] = df.apply(extract_pop_city, axis=1)
+    else:
+        df["Place of Performance"] = ""
+
+    if "award" in df.columns:
+        df["Award Value"] = df.apply(extract_award_value, axis=1)
+    else:
+        df["Award Value"] = ""
+
+    # ---- Clean up description: strip API URLs ----
+    if "Description" in df.columns:
+        df["Description"] = df["Description"].apply(
+            lambda v: "" if str(v).strip().startswith("http") else v
+        )
+
     # ---- FIXED: mixed datetime parsing ----
     if "Posted Date" in df.columns:
         posted_sort = parse_datetime_series_mixed(df["Posted Date"])
@@ -834,7 +879,7 @@ def clean_sam_results(df, user_naics=None, user_states=None, user_keywords="", u
     preferred = [
         "Title", "Solicitation #", "Agency", "Notice Type", "Base Type", "Archive Type",
         "Set-Aside", "Posted Date", "Response Deadline", "NAICS", "NAICS Description",
-        "State", "Link", "Description", "Source",
+        "State", "Place of Performance", "Award Value", "Link", "Description", "Source",
         "Fit Score", "Fit Label", "Fit Reasons", "Posted Date Sort", "Response Deadline Sort",
     ]
     existing = [c for c in preferred if c in df.columns]
@@ -968,25 +1013,32 @@ def render_sam_cards(df, max_cards=100):
         </div>""", unsafe_allow_html=True)
         return
 
-    total = len(df)
+    total   = len(df)
     showing = min(total, max_cards)
     st.caption(f"{total:,} result(s) found — showing top {showing:,} by fit score")
 
     for idx, (_, row) in enumerate(df.head(max_cards).iterrows()):
+        # ---- raw values ----
         title        = safe_text(row.get("Title"))
         solicitation = safe_text(row.get("Solicitation #"))
         agency       = safe_text(row.get("Agency"))
         notice_type  = safe_text(row.get("Notice Type"))
         base_type    = safe_text(row.get("Base Type"))
-        archive_type = safe_text(row.get("Archive Type"))
         set_aside    = safe_text(row.get("Set-Aside"))
         posted       = safe_text(row.get("Posted Date"))
         deadline     = safe_text(row.get("Response Deadline"))
         naics        = safe_text(row.get("NAICS"))
         naics_desc   = safe_text(row.get("NAICS Description"))
         state        = safe_text(row.get("State"))
-        description  = truncate_text(row.get("Description"), 220)
-        link         = str(row.get("Link", "")).strip()
+        pop          = safe_text(row.get("Place of Performance"), "")
+        award_val    = safe_text(row.get("Award Value"), "")
+        description  = safe_text(row.get("Description"), "")
+        # Strip descriptions that are just API URLs
+        if description.startswith("http"):
+            description = ""
+        if len(description) > 300:
+            description = description[:300].rstrip() + "..."
+        link = str(row.get("Link", "")).strip()
 
         fit_score   = row.get("Fit Score", 0)
         fit_label   = row.get("Fit Label", "Low Fit")
@@ -994,38 +1046,59 @@ def render_sam_cards(df, max_cards=100):
         if not isinstance(fit_reasons, list):
             fit_reasons = []
 
-        link_html = ""
-        if link and link.lower() not in ["nan", ""]:
-            link_html = f'<div class="link-row"><a href="{link}" target="_blank">🔗 Open on SAM.gov ↗</a></div>'
+        # ---- HTML-escape all user data ----
+        et     = h(title)
+        esol   = h(solicitation)
+        eagency = h(agency)
+        enotice = h(notice_type)
+        ebase  = h(base_type)
+        esa    = h(set_aside)
+        enaics = h(naics)
+        enaics_desc = h(naics_desc)
+        estate = h(state)
+        epop   = h(pop) if pop and pop != "—" else ""
+        eaward = h(award_val) if award_val and award_val != "—" else ""
+        edesc  = _html.escape(description) if description else ""
 
-        desc_html = f"<div class='result-meta'><strong>Summary:</strong> {description}</div>" if description else ""
-        state_badge = f'<span class="badge state-badge">{state}</span>' if state not in ["—", ""] else ""
-        naics_badge = f'<span class="badge naics-badge">NAICS {naics}</span>' if naics not in ["—", ""] else ""
+        # ---- build optional HTML rows ----
+        link_html  = f'<div class="link-row"><a href="{_html.escape(link)}" target="_blank">🔗 Open on SAM.gov ↗</a></div>' if link and link.lower() not in ["nan", ""] else ""
+        desc_html  = f'<div class="result-meta"><strong>Description:</strong> {edesc}</div>' if edesc else ""
+        award_html = f'<div class="result-meta"><strong>Award Value:</strong> {eaward}</div>' if eaward else ""
+        pop_html   = f'<div class="result-meta"><strong>Place of Performance:</strong> {epop}</div>' if epop else ""
+        sa_html    = f'<div class="result-meta"><strong>Set-Aside:</strong> {esa}</div>' if esa not in ["—", ""] else '<div class="result-meta"><strong>Set-Aside:</strong> No set-aside specified</div>'
+
+        state_badge = f'<span class="badge state-badge">{estate}</span>' if estate not in ["—", ""] else ""
+        naics_badge = f'<span class="badge naics-badge">NAICS {enaics}</span>' if enaics not in ["—", ""] else ""
+        award_badge = f'<span class="badge value-badge">💵 {eaward}</span>' if eaward else ""
 
         st.markdown(f"""
-        <div class="result-card">
-            <div class="result-title">{title}</div>
-            {bid_box_html(fit_score, fit_label, fit_reasons, notice_type)}
-            <div class="result-meta"><strong>Solicitation #:</strong> {solicitation}</div>
-            <div class="result-meta"><strong>Agency:</strong> {agency}</div>
-            <div class="result-meta"><strong>Notice:</strong> {notice_type} &nbsp;|&nbsp; <strong>Base Type:</strong> {base_type} &nbsp;|&nbsp; <strong>Archive:</strong> {archive_type}</div>
-            <div class="result-meta"><strong>Set-Aside:</strong> {set_aside}</div>
-            {desc_html}
-            <div class="result-badges">
-                <span class="badge date-badge">📅 Posted: {posted}</span>
-                <span class="badge date-badge">⏰ Deadline: {deadline}</span>
-                {naics_badge}
-                {state_badge}
-                <span class="badge source-badge">SAM.gov</span>
-                <span class="badge type-badge">{notice_type}</span>
-            </div>
-            {link_html}
-            {pro_lock_html()}
-        </div>
+<div class="result-card">
+    <div class="result-title">{et}</div>
+    {bid_box_html(fit_score, fit_label, fit_reasons, notice_type)}
+    <div class="result-meta"><strong>Solicitation #:</strong> {esol}</div>
+    <div class="result-meta"><strong>Agency:</strong> {eagency}</div>
+    <div class="result-meta"><strong>Notice Type:</strong> {enotice} &nbsp;|&nbsp; <strong>Base Type:</strong> {ebase}</div>
+    {sa_html}
+    {award_html}
+    {pop_html}
+    <div class="result-meta"><strong>NAICS:</strong> {enaics} — {enaics_desc}</div>
+    {desc_html}
+    <div class="result-badges">
+        <span class="badge date-badge">📅 Posted: {posted}</span>
+        <span class="badge date-badge">⏰ Deadline: {deadline}</span>
+        {award_badge}
+        {naics_badge}
+        {state_badge}
+        <span class="badge source-badge">SAM.gov</span>
+        <span class="badge type-badge">{enotice}</span>
+    </div>
+    {link_html}
+    {pro_lock_html()}
+</div>
         """, unsafe_allow_html=True)
 
-        # Save button row (Streamlit widget, below card)
-        sol_id   = solicitation if solicitation != "—" else f"sam_row_{idx}"
+        # Save button row
+        sol_id        = solicitation if solicitation != "—" else f"sam_row_{idx}"
         saved_already = is_opportunity_saved(sol_id, "SAM")
         _bcols = st.columns([1, 7])
         with _bcols[0]:
@@ -1034,18 +1107,12 @@ def render_sam_cards(df, max_cards=100):
             else:
                 if st.button("💾 Save", key=f"save_sam_{idx}"):
                     save_opportunity({
-                        "id": sol_id,
-                        "source": "SAM",
-                        "title": title,
-                        "agency": agency,
-                        "notice_type": notice_type,
-                        "deadline": deadline,
-                        "naics": naics,
-                        "state": state,
-                        "fit_score": fit_score,
-                        "fit_label": fit_label,
-                        "link": link,
-                        "saved_at": date.today().isoformat(),
+                        "id": sol_id, "source": "SAM",
+                        "title": title, "agency": agency,
+                        "notice_type": notice_type, "deadline": deadline,
+                        "naics": naics, "state": state,
+                        "fit_score": fit_score, "fit_label": fit_label,
+                        "link": link, "saved_at": date.today().isoformat(),
                     })
                     st.rerun()
         st.write("")  # spacer
