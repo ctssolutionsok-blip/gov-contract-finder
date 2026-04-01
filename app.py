@@ -346,10 +346,7 @@ st.markdown("""
     <div class="info-card-body">
         <div class="info-card-title">What this tool does</div>
         <div class="info-card-text">
-            Pulls <strong>all matching records</strong> from SAM.gov and USAspending using automatic
-            pagination — not just the first 100. Use it to research the market, spot targets, and
-            identify contract activity more efficiently. Data is sourced from third-party federal
-            systems — verify all information independently before relying on it for business decisions.
+            Pulls <strong>all matching records</strong> from SAM.gov and USAspending. This data can  	    be used to research the market, spot targets, and identify contract activity more 		    efficiently. Data is sourced from third-party federal systems, verify all information      	    independently before relying on it for business decisions.
         </div>
     </div>
 </div>
