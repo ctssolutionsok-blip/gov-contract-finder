@@ -923,18 +923,18 @@ def dfs_to_excel_bytes(sam_df: pd.DataFrame, usa_df: pd.DataFrame) -> bytes:
 # RENDER HELPERS
 # ================================================================
 def pro_lock_html():
-    return """
-    <div class="pro-lock-section">
-        <div class="pro-lock-title">🔒 Pro Insights — Upgrade to Unlock</div>
-        <div class="pro-lock-grid">
-            <div class="pro-lock-item">🔁 <span>Recompete: 2025-Q4</span></div>
-            <div class="pro-lock-item">🏢 <span>Incumbent: Acme Corp</span></div>
-            <div class="pro-lock-item">🔔 <span>Deadline Alert Setup</span></div>
-            <div class="pro-lock-item">📊 <span>Win Probability: 62%</span></div>
-        </div>
-        <div class="pro-upgrade-cta">⚡ Upgrade to Pro — $15/month early access</div>
-    </div>
-    """
+    return (
+        '<div class="pro-lock-section">'
+        '<div class="pro-lock-title">🔒 Pro Insights — Upgrade to Unlock</div>'
+        '<div class="pro-lock-grid">'
+        '<div class="pro-lock-item">🔁 <span>Recompete: 2025-Q4</span></div>'
+        '<div class="pro-lock-item">🏢 <span>Incumbent: Acme Corp</span></div>'
+        '<div class="pro-lock-item">🔔 <span>Deadline Alert Setup</span></div>'
+        '<div class="pro-lock-item">📊 <span>Win Probability: 62%</span></div>'
+        '</div>'
+        '<div class="pro-upgrade-cta">⚡ Upgrade to Pro — $15/month early access</div>'
+        '</div>'
+    )
 
 def bid_box_html(score, label, reasons, notice_type=""):
     if label == "Strong Fit":
@@ -947,23 +947,28 @@ def bid_box_html(score, label, reasons, notice_type=""):
         box_cls, verdict_cls, pill_cls = "bid-low", "low", "pill-low"
         verdict = "Low Priority"
 
-    reasons_html = "".join(f"<div>{r}</div>" for r in reasons) if reasons else ""
+    # Escape each reason so special chars from SAM data don't break HTML
+    reasons_html = "".join(f'<div>{_html.escape(str(r))}</div>' for r in reasons) if reasons else ""
     guidance = get_notice_guidance(notice_type)
-    guidance_html = f'<div class="bid-guidance">💡 {guidance}</div>' if guidance else ""
+    guidance_html = f'<div class="bid-guidance">💡 {_html.escape(guidance)}</div>' if guidance else ""
 
-    return f"""
-    <div class="bid-box {box_cls}">
-        <div class="bid-top-row">
-            <div>
-                <div class="bid-question">Should I Bid?</div>
-                <div class="bid-verdict {verdict_cls}">{verdict}</div>
-            </div>
-            <div class="bid-score-pill {pill_cls}">{score}/100 · {label}</div>
-        </div>
-        <div class="bid-reasons">{reasons_html}</div>
-        {guidance_html}
-    </div>
-    """
+    # Flat HTML — no leading spaces — prevents Streamlit markdown code-block detection
+    return (
+        f'<div class="bid-box {box_cls}">'
+        f'<div class="bid-top-row">'
+        f'<div><div class="bid-question">Should I Bid?</div>'
+        f'<div class="bid-verdict {verdict_cls}">{verdict}</div></div>'
+        f'<div class="bid-score-pill {pill_cls}">{score}/100 · {label}</div>'
+        f'</div>'
+        f'<div class="bid-reasons">{reasons_html}</div>'
+        f'{guidance_html}'
+        f'</div>'
+    )
+
+def mhtml(s: str) -> str:
+    """Strip leading whitespace from every line so Streamlit's markdown parser
+    never mistakes indented HTML lines for code blocks (4-space rule)."""
+    return "\n".join(line.lstrip() for line in s.split("\n"))
 
 def render_table(df, source_name):
     if df is None or df.empty:
@@ -979,38 +984,39 @@ def render_top_opportunities(sam_df, n=5):
     top = sam_df.sort_values("Fit Score", ascending=False).head(n)
     rows_html = ""
     for i, (_, row) in enumerate(top.iterrows(), 1):
-        title  = safe_text(row.get("Title"))[:72]
-        agency = safe_text(row.get("Agency"))[:55]
-        score  = row.get("Fit Score", 0)
-        label  = row.get("Fit Label", "Low Fit")
+        title    = _html.escape(safe_text(row.get("Title"))[:72])
+        agency   = _html.escape(safe_text(row.get("Agency"))[:55])
+        score    = row.get("Fit Score", 0)
+        label    = row.get("Fit Label", "Low Fit")
         pill_cls = {"Strong Fit": "score-strong-pill", "Moderate Fit": "score-moderate-pill"}.get(label, "score-low-pill")
-        rows_html += f"""
-        <div class="top-opp-row">
-            <div class="top-opp-rank">#{i}</div>
-            <div class="top-opp-content">
-                <div class="top-opp-name">{title}</div>
-                <div class="top-opp-meta">{agency}</div>
-            </div>
-            <div class="top-opp-score {pill_cls}">{score} · {label}</div>
-        </div>
-        """
-    st.markdown(f"""
-    <div class="top-opps-wrap">
-        <div class="top-opps-header">🏆 Best Matches</div>
-        <div class="top-opps-title">Top Opportunities This Search</div>
-        {rows_html}
-    </div>
-    """, unsafe_allow_html=True)
+        rows_html += (
+            f'<div class="top-opp-row">'
+            f'<div class="top-opp-rank">#{i}</div>'
+            f'<div class="top-opp-content">'
+            f'<div class="top-opp-name">{title}</div>'
+            f'<div class="top-opp-meta">{agency}</div>'
+            f'</div>'
+            f'<div class="top-opp-score {pill_cls}">{score} · {label}</div>'
+            f'</div>'
+        )
+    st.markdown(mhtml(
+        f'<div class="top-opps-wrap">'
+        f'<div class="top-opps-header">🏆 Best Matches</div>'
+        f'<div class="top-opps-title">Top Opportunities This Search</div>'
+        f'{rows_html}'
+        f'</div>'
+    ), unsafe_allow_html=True)
 
 # ---- SAM.gov Card Renderer ----
 def render_sam_cards(df, max_cards=100):
     if df is None or df.empty:
-        st.markdown("""
-        <div class="empty-state">
-            <div class="empty-state-icon">🔭</div>
-            <div class="empty-state-title">No SAM.gov opportunities found</div>
-            Try broadening your date range, removing NAICS filters, or adjusting keywords.
-        </div>""", unsafe_allow_html=True)
+        st.markdown(mhtml(
+            '<div class="empty-state">'
+            '<div class="empty-state-icon">🔭</div>'
+            '<div class="empty-state-title">No SAM.gov opportunities found</div>'
+            'Try broadening your date range, removing NAICS filters, or adjusting keywords.'
+            '</div>'
+        ), unsafe_allow_html=True)
         return
 
     total   = len(df)
@@ -1033,7 +1039,6 @@ def render_sam_cards(df, max_cards=100):
         pop          = safe_text(row.get("Place of Performance"), "")
         award_val    = safe_text(row.get("Award Value"), "")
         description  = safe_text(row.get("Description"), "")
-        # Strip descriptions that are just API URLs
         if description.startswith("http"):
             description = ""
         if len(description) > 300:
@@ -1047,55 +1052,55 @@ def render_sam_cards(df, max_cards=100):
             fit_reasons = []
 
         # ---- HTML-escape all user data ----
-        et     = h(title)
-        esol   = h(solicitation)
-        eagency = h(agency)
-        enotice = h(notice_type)
-        ebase  = h(base_type)
-        esa    = h(set_aside)
-        enaics = h(naics)
+        et          = h(title)
+        esol        = h(solicitation)
+        eagency     = h(agency)
+        enotice     = h(notice_type)
+        ebase       = h(base_type)
+        esa         = h(set_aside)
+        enaics      = h(naics)
         enaics_desc = h(naics_desc)
-        estate = h(state)
-        epop   = h(pop) if pop and pop != "—" else ""
-        eaward = h(award_val) if award_val and award_val != "—" else ""
-        edesc  = _html.escape(description) if description else ""
+        estate      = h(state)
+        epop        = h(pop) if pop and pop != "—" else ""
+        eaward      = h(award_val) if award_val and award_val != "—" else ""
+        edesc       = _html.escape(description) if description else ""
 
-        # ---- build optional HTML rows ----
-        link_html  = f'<div class="link-row"><a href="{_html.escape(link)}" target="_blank">🔗 Open on SAM.gov ↗</a></div>' if link and link.lower() not in ["nan", ""] else ""
+        # ---- build optional inline HTML pieces ----
+        safe_link  = _html.escape(link) if link and link.lower() not in ["nan", ""] else ""
+        link_html  = f'<div class="link-row"><a href="{safe_link}" target="_blank">🔗 Open on SAM.gov ↗</a></div>' if safe_link else ""
         desc_html  = f'<div class="result-meta"><strong>Description:</strong> {edesc}</div>' if edesc else ""
         award_html = f'<div class="result-meta"><strong>Award Value:</strong> {eaward}</div>' if eaward else ""
         pop_html   = f'<div class="result-meta"><strong>Place of Performance:</strong> {epop}</div>' if epop else ""
-        sa_html    = f'<div class="result-meta"><strong>Set-Aside:</strong> {esa}</div>' if esa not in ["—", ""] else '<div class="result-meta"><strong>Set-Aside:</strong> No set-aside specified</div>'
-
+        sa_text    = esa if esa not in ["—", ""] else "No set-aside specified"
+        sa_html    = f'<div class="result-meta"><strong>Set-Aside:</strong> {sa_text}</div>'
         state_badge = f'<span class="badge state-badge">{estate}</span>' if estate not in ["—", ""] else ""
         naics_badge = f'<span class="badge naics-badge">NAICS {enaics}</span>' if enaics not in ["—", ""] else ""
         award_badge = f'<span class="badge value-badge">💵 {eaward}</span>' if eaward else ""
 
-        st.markdown(f"""
-<div class="result-card">
-    <div class="result-title">{et}</div>
-    {bid_box_html(fit_score, fit_label, fit_reasons, notice_type)}
-    <div class="result-meta"><strong>Solicitation #:</strong> {esol}</div>
-    <div class="result-meta"><strong>Agency:</strong> {eagency}</div>
-    <div class="result-meta"><strong>Notice Type:</strong> {enotice} &nbsp;|&nbsp; <strong>Base Type:</strong> {ebase}</div>
-    {sa_html}
-    {award_html}
-    {pop_html}
-    <div class="result-meta"><strong>NAICS:</strong> {enaics} — {enaics_desc}</div>
-    {desc_html}
-    <div class="result-badges">
-        <span class="badge date-badge">📅 Posted: {posted}</span>
-        <span class="badge date-badge">⏰ Deadline: {deadline}</span>
-        {award_badge}
-        {naics_badge}
-        {state_badge}
-        <span class="badge source-badge">SAM.gov</span>
-        <span class="badge type-badge">{enotice}</span>
-    </div>
-    {link_html}
-    {pro_lock_html()}
-</div>
-        """, unsafe_allow_html=True)
+        card_html = (
+            f'<div class="result-card">'
+            f'<div class="result-title">{et}</div>'
+            f'{bid_box_html(fit_score, fit_label, fit_reasons, notice_type)}'
+            f'<div class="result-meta"><strong>Solicitation #:</strong> {esol}</div>'
+            f'<div class="result-meta"><strong>Agency:</strong> {eagency}</div>'
+            f'<div class="result-meta"><strong>Notice Type:</strong> {enotice} &nbsp;|&nbsp; <strong>Base Type:</strong> {ebase}</div>'
+            f'{sa_html}'
+            f'{award_html}'
+            f'{pop_html}'
+            f'<div class="result-meta"><strong>NAICS:</strong> {enaics} — {enaics_desc}</div>'
+            f'{desc_html}'
+            f'<div class="result-badges">'
+            f'<span class="badge date-badge">📅 Posted: {posted}</span>'
+            f'<span class="badge date-badge">⏰ Deadline: {deadline}</span>'
+            f'{award_badge}{naics_badge}{state_badge}'
+            f'<span class="badge source-badge">SAM.gov</span>'
+            f'<span class="badge type-badge">{enotice}</span>'
+            f'</div>'
+            f'{link_html}'
+            f'{pro_lock_html()}'
+            f'</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 
         # Save button row
         sol_id        = solicitation if solicitation != "—" else f"sam_row_{idx}"
@@ -1123,15 +1128,17 @@ def render_sam_cards(df, max_cards=100):
             "Switch to **Table View** to see all results, or narrow your filters."
         )
 
+
 # ---- USAspending Card Renderer ----
 def render_usaspending_cards(df, max_cards=100):
     if df is None or df.empty:
-        st.markdown("""
-        <div class="empty-state">
-            <div class="empty-state-icon">💰</div>
-            <div class="empty-state-title">No USAspending awards found</div>
-            Try expanding your date range, adjusting the minimum value, or removing NAICS filters.
-        </div>""", unsafe_allow_html=True)
+        st.markdown(mhtml(
+            '<div class="empty-state">'
+            '<div class="empty-state-icon">💰</div>'
+            '<div class="empty-state-title">No USAspending awards found</div>'
+            'Try expanding your date range, adjusting the minimum value, or removing NAICS filters.'
+            '</div>'
+        ), unsafe_allow_html=True)
         return
 
     total   = len(df)
@@ -1150,32 +1157,46 @@ def render_usaspending_cards(df, max_cards=100):
         naics       = safe_text(row.get("NAICS"))
         naics_desc  = safe_text(row.get("NAICS Description"))
         state       = safe_text(row.get("State"))
-        description = truncate_text(row.get("Description"), 220)
+        description = safe_text(row.get("Description"), "")
+        if len(description) > 300:
+            description = description[:300].rstrip() + "..."
 
-        desc_html   = f"<div class='result-meta'><strong>Description:</strong> {description}</div>" if description else ""
-        state_badge = f'<span class="badge state-badge">{state}</span>' if state not in ["—", ""] else ""
-        naics_badge = f'<span class="badge naics-badge">NAICS {naics}</span>' if naics not in ["—", ""] else ""
+        # HTML-escape all fields
+        er       = h(recipient)
+        eaid     = h(award_id)
+        eagency  = h(agency)
+        esub     = h(sub_agency)
+        eatype   = h(award_type)
+        eaval    = h(award_value)
+        estate   = h(state)
+        enaics   = h(naics)
+        endesc   = h(naics_desc)
+        edesc    = _html.escape(description) if description else ""
 
-        st.markdown(f"""
-        <div class="result-card">
-            <div class="result-title">{recipient}</div>
-            <div class="result-meta"><strong>Award ID:</strong> {award_id}</div>
-            <div class="result-meta"><strong>Agency:</strong> {agency}</div>
-            <div class="result-meta"><strong>Sub-Agency:</strong> {sub_agency}</div>
-            <div class="result-meta"><strong>Award Type:</strong> {award_type}</div>
-            <div class="result-meta"><strong>NAICS:</strong> {naics} — {naics_desc}</div>
-            {desc_html}
-            <div class="result-badges">
-                <span class="badge value-badge">💵 {award_value}</span>
-                <span class="badge date-badge">▶ Start: {start_date}</span>
-                <span class="badge date-badge">■ End: {end_date}</span>
-                {naics_badge}
-                {state_badge}
-                <span class="badge source-badge">USAspending</span>
-            </div>
-            {pro_lock_html()}
-        </div>
-        """, unsafe_allow_html=True)
+        desc_html   = f'<div class="result-meta"><strong>Description:</strong> {edesc}</div>' if edesc else ""
+        state_badge = f'<span class="badge state-badge">{estate}</span>' if estate not in ["—", ""] else ""
+        naics_badge = f'<span class="badge naics-badge">NAICS {enaics}</span>' if enaics not in ["—", ""] else ""
+
+        card_html = (
+            f'<div class="result-card">'
+            f'<div class="result-title">{er}</div>'
+            f'<div class="result-meta"><strong>Award ID:</strong> {eaid}</div>'
+            f'<div class="result-meta"><strong>Agency:</strong> {eagency}</div>'
+            f'<div class="result-meta"><strong>Sub-Agency:</strong> {esub}</div>'
+            f'<div class="result-meta"><strong>Award Type:</strong> {eatype}</div>'
+            f'<div class="result-meta"><strong>NAICS:</strong> {enaics} — {endesc}</div>'
+            f'{desc_html}'
+            f'<div class="result-badges">'
+            f'<span class="badge value-badge">💵 {eaval}</span>'
+            f'<span class="badge date-badge">▶ Start: {start_date}</span>'
+            f'<span class="badge date-badge">■ End: {end_date}</span>'
+            f'{naics_badge}{state_badge}'
+            f'<span class="badge source-badge">USAspending</span>'
+            f'</div>'
+            f'{pro_lock_html()}'
+            f'</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 
         # Save button
         award_id_clean = award_id if award_id != "—" else f"usa_row_{idx}"
@@ -1187,18 +1208,12 @@ def render_usaspending_cards(df, max_cards=100):
             else:
                 if st.button("💾 Save", key=f"save_usa_{idx}"):
                     save_opportunity({
-                        "id": award_id_clean,
-                        "source": "USA",
-                        "title": recipient,
-                        "agency": agency,
-                        "notice_type": award_type,
-                        "deadline": end_date,
-                        "naics": naics,
-                        "state": state,
-                        "fit_score": 0,
-                        "fit_label": "Award",
-                        "link": "",
-                        "saved_at": date.today().isoformat(),
+                        "id": award_id_clean, "source": "USA",
+                        "title": recipient, "agency": agency,
+                        "notice_type": award_type, "deadline": end_date,
+                        "naics": naics, "state": state,
+                        "fit_score": 0, "fit_label": "Award",
+                        "link": "", "saved_at": date.today().isoformat(),
                     })
                     st.rerun()
         st.write("")
@@ -1222,12 +1237,13 @@ def render_results(df, source_name, view_mode):
 def render_saved_opportunities():
     saved = st.session_state.saved_opportunities
     if not saved:
-        st.markdown("""
-        <div class="empty-state">
-            <div class="empty-state-icon">🔖</div>
-            <div class="empty-state-title">No saved opportunities yet</div>
-            Run a search and click <strong>💾 Save</strong> on any result card to bookmark it here.
-        </div>""", unsafe_allow_html=True)
+        st.markdown(mhtml(
+            '<div class="empty-state">'
+            '<div class="empty-state-icon">🔖</div>'
+            '<div class="empty-state-title">No saved opportunities yet</div>'
+            'Run a search and click <strong>💾 Save</strong> on any result card to bookmark it here.'
+            '</div>'
+        ), unsafe_allow_html=True)
         return
 
     st.caption(f"{len(saved)} saved opportunity(ies)")
@@ -1257,24 +1273,33 @@ def render_saved_opportunities():
             if fit_label and fit_label != "Award"
             else '<span class="saved-opp-badge" style="background:#dbeafe;color:#1e3a8a;padding:0.2rem 0.5rem;border-radius:999px;font-size:0.72rem;font-weight:700;">Award Record</span>'
         )
+        et_title  = h(title)
+        et_agency = h(agency)
+        et_notice = h(notice)
+        et_state  = h(state)
+        et_naics  = h(naics)
+        et_dl     = h(deadline)
+        et_saved  = h(saved_at)
+        safe_link = _html.escape(link) if link and link not in ["", "—"] else ""
         link_html = (
-            f' &nbsp;·&nbsp; <a href="{link}" target="_blank" style="color:#2563eb;font-size:0.75rem;font-weight:600;">Open ↗</a>'
-            if link and link not in ["", "—"] else ""
+            f' &nbsp;·&nbsp; <a href="{safe_link}" target="_blank" style="color:#2563eb;font-size:0.75rem;font-weight:600;">Open ↗</a>'
+            if safe_link else ""
         )
 
-        st.markdown(f"""
-        <div class="saved-opp-card">
-            <div class="saved-opp-icon">{source_icon}</div>
-            <div class="saved-opp-content">
-                <div class="saved-opp-title">{title}</div>
-                <div class="saved-opp-meta">
-                    {agency} &nbsp;·&nbsp; {notice} &nbsp;·&nbsp; {state} &nbsp;·&nbsp; NAICS {naics}<br>
-                    ⏰ {deadline} &nbsp;·&nbsp; Saved {saved_at}{link_html}
-                </div>
-                <div style="margin-top:0.3rem;">{score_badge}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        card_html = (
+            f'<div class="saved-opp-card">'
+            f'<div class="saved-opp-icon">{source_icon}</div>'
+            f'<div class="saved-opp-content">'
+            f'<div class="saved-opp-title">{et_title}</div>'
+            f'<div class="saved-opp-meta">'
+            f'{et_agency} &nbsp;·&nbsp; {et_notice} &nbsp;·&nbsp; {et_state} &nbsp;·&nbsp; NAICS {et_naics}<br>'
+            f'⏰ {et_dl} &nbsp;·&nbsp; Saved {et_saved}{link_html}'
+            f'</div>'
+            f'<div style="margin-top:0.3rem;">{score_badge}</div>'
+            f'</div>'
+            f'</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 
         if st.button("🗑️ Remove", key=f"remove_{key}"):
             remove_opportunity(key)
@@ -1282,27 +1307,27 @@ def render_saved_opportunities():
 
 # ---- Alerts Placeholder Panel ----
 def render_alerts_placeholder():
-    st.markdown("""
-    <div class="alert-placeholder">
-        <div class="alert-placeholder-icon">🔔</div>
-        <div class="alert-placeholder-title">
-            Smart Alerts &amp; Notifications
-            <span class="coming-soon-badge">Pro — Coming Soon</span>
-        </div>
-        <div class="alert-placeholder-text">
-            Get notified the moment new opportunities matching your criteria are posted.
-            Never miss a deadline or a recompete window again.
-        </div>
-        <div class="alert-feature-grid">
-            <div class="alert-feature-item">📧 Email alerts for new matches</div>
-            <div class="alert-feature-item">⏰ Deadline reminder (7 days out)</div>
-            <div class="alert-feature-item">🔁 Recompete tracking alerts</div>
-            <div class="alert-feature-item">📊 Weekly digest of top opps</div>
-            <div class="alert-feature-item">🏢 Incumbent award notifications</div>
-            <div class="alert-feature-item">🔖 Saved search auto-run</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(mhtml(
+        '<div class="alert-placeholder">'
+        '<div class="alert-placeholder-icon">🔔</div>'
+        '<div class="alert-placeholder-title">'
+        'Smart Alerts &amp; Notifications '
+        '<span class="coming-soon-badge">Pro — Coming Soon</span>'
+        '</div>'
+        '<div class="alert-placeholder-text">'
+        'Get notified the moment new opportunities matching your criteria are posted. '
+        'Never miss a deadline or a recompete window again.'
+        '</div>'
+        '<div class="alert-feature-grid">'
+        '<div class="alert-feature-item">📧 Email alerts for new matches</div>'
+        '<div class="alert-feature-item">⏰ Deadline reminder (7 days out)</div>'
+        '<div class="alert-feature-item">🔁 Recompete tracking alerts</div>'
+        '<div class="alert-feature-item">📊 Weekly digest of top opps</div>'
+        '<div class="alert-feature-item">🏢 Incumbent award notifications</div>'
+        '<div class="alert-feature-item">🔖 Saved search auto-run</div>'
+        '</div>'
+        '</div>'
+    ), unsafe_allow_html=True)
     st.write("")
     st.subheader("📋 Register Your Interest")
     with st.form("alerts_interest_form"):
